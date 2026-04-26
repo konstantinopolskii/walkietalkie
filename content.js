@@ -424,7 +424,7 @@
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .stop {
+        .action {
           flex: 0 0 auto;
           width: 26px;
           height: 26px;
@@ -441,9 +441,9 @@
           transition: background 120ms ease-out, transform 120ms ease-out;
           font: inherit;
         }
-        .stop:hover { background: rgba(255, 255, 255, 0.24); }
-        .stop:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.32); }
-        .stop:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 2px; }
+        .action:hover { background: rgba(255, 255, 255, 0.24); }
+        .action:active { transform: scale(0.94); background: rgba(255, 255, 255, 0.32); }
+        .action:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: 2px; }
         .stop-icon {
           width: 10px;
           height: 10px;
@@ -451,6 +451,32 @@
           border-radius: 2px;
           display: block;
         }
+        .play-icon {
+          width: 0;
+          height: 0;
+          border-left: 9px solid #fff;
+          border-top: 6px solid transparent;
+          border-bottom: 6px solid transparent;
+          margin-left: 2px;
+          display: block;
+        }
+        .overlay[data-state="recording"] .play-icon { display: none; }
+        .overlay[data-state="saved"] .stop-icon { display: none; }
+
+        /* Saved state — overlay stays put, the wave goes flat, the action
+           flips to play, the bg gets a green wash so it reads as "done,
+           safe to leave, click to go again". */
+        .overlay[data-state="saved"] {
+          background: rgba(20, 90, 56, 0.92);
+        }
+        .overlay[data-state="saved"] .action {
+          background: rgba(255, 255, 255, 0.20);
+        }
+        .overlay[data-state="saved"] .action:hover {
+          background: rgba(255, 255, 255, 0.30);
+        }
+        .overlay[data-state="saved"] .wave-btn { cursor: default; }
+        .overlay[data-state="saved"] .wave-btn:hover { background: transparent; }
 
         /* Mic picker popover, anchored above the wave when expanded */
         .mics {
@@ -527,7 +553,7 @@
         }
         .toast[data-show="1"] { opacity: 1; }
       </style>
-      <div class="overlay" role="status" aria-label="WalkieTalkie recording">
+      <div class="overlay" role="status" data-state="recording" aria-label="WalkieTalkie recording">
         <button class="wave-btn" type="button" aria-label="Switch microphone" title="Switch microphone">
           <canvas></canvas>
         </button>
@@ -535,11 +561,11 @@
           <span class="tag">Recording</span>
           <span class="text"></span>
         </div>
-        <button class="stop" type="button" aria-label="Stop and copy briefing" title="Stop and copy briefing">
+        <button class="action" type="button" aria-label="Stop and copy briefing" title="Stop and copy briefing">
           <span class="stop-icon"></span>
+          <span class="play-icon"></span>
         </button>
         <div class="mics" hidden></div>
-        <div class="toast"></div>
       </div>
     `;
     document.documentElement.appendChild(overlayHost);
@@ -552,8 +578,16 @@
     waveCtx.scale(dpr, dpr);
     levelSamples.length = 0;
 
-    overlayShadow.querySelector(".stop").addEventListener("click", handleStopClick);
-    overlayShadow.querySelector(".wave-btn").addEventListener("click", toggleMicPicker);
+    overlayShadow.querySelector(".action").addEventListener("click", () => {
+      const state = overlayShadow.querySelector(".overlay")?.dataset.state;
+      if (state === "saved") handlePlayClick();
+      else handleStopClick();
+    });
+    overlayShadow.querySelector(".wave-btn").addEventListener("click", () => {
+      const state = overlayShadow.querySelector(".overlay")?.dataset.state;
+      if (state === "saved") return; // mic picker only in recording state
+      toggleMicPicker();
+    });
 
     setOverlayLabel("Recording", clip(document.title || location.host, 60));
     drawWave();
@@ -598,26 +632,43 @@
   async function handleStopClick() {
     const res = await chrome.runtime.sendMessage({ target: "background", type: "popup:stop" }).catch(() => null);
     if (!res?.ok) return;
+    let copied = false;
     if (res.briefing) {
       try {
         await navigator.clipboard.writeText(res.briefing);
-        flashToast("Copied briefing to clipboard");
-      } catch {
-        flashToast("Saved — clipboard blocked, copy from popup");
-      }
-    } else {
-      flashToast("Saved");
+        copied = true;
+      } catch {}
     }
-    // Overlay tear-down comes from background broadcasting content:stop
-    // to every tab; the toast lives just long enough to be seen first.
+    transitionOverlayToSaved(copied
+      ? "Successfully copied briefing to clipboard"
+      : "Saved to disk — clipboard blocked");
   }
 
-  function flashToast(text) {
+  async function handlePlayClick() {
+    await chrome.runtime.sendMessage({ target: "background", type: "content:start" }).catch(() => {});
+    // Background broadcasts content:start to all tabs; our start() handler
+    // flips the overlay back to recording state.
+  }
+
+  function transitionOverlayToSaved(message) {
     if (!overlayShadow) return;
-    const toast = overlayShadow.querySelector(".toast");
-    if (!toast) return;
-    toast.textContent = text;
-    toast.dataset.show = "1";
+    if (waveRaf) cancelAnimationFrame(waveRaf);
+    waveRaf = null;
+    levelSamples.length = 0;
+    if (waveCtx) waveCtx.clearRect(0, 0, 64, 26);
+    const overlay = overlayShadow.querySelector(".overlay");
+    if (overlay) overlay.dataset.state = "saved";
+    const micsPanel = overlayShadow.querySelector(".mics");
+    if (micsPanel) {
+      micsPanel.hidden = true;
+      micsPanel.innerHTML = "";
+    }
+    const actionBtn = overlayShadow.querySelector(".action");
+    if (actionBtn) {
+      actionBtn.setAttribute("aria-label", "Start recording");
+      actionBtn.setAttribute("title", "Start recording");
+    }
+    setOverlayLabel("Saved", message);
   }
 
   function destroyOverlay() {
@@ -701,12 +752,32 @@
     clearHighlight();
   }
 
+  function transitionOverlayToRecording() {
+    if (!overlayShadow) return;
+    const overlay = overlayShadow.querySelector(".overlay");
+    if (overlay) overlay.dataset.state = "recording";
+    levelSamples.length = 0;
+    setOverlayLabel("Recording", clip(document.title || location.host, 60));
+    const actionBtn = overlayShadow.querySelector(".action");
+    if (actionBtn) {
+      actionBtn.setAttribute("aria-label", "Stop and copy briefing");
+      actionBtn.setAttribute("title", "Stop and copy briefing");
+    }
+    if (!waveRaf) drawWave();
+  }
+
   function start(t) {
     if (recording) return;
     recording = true;
     startedAt = t || Date.now();
     attach();
-    showOverlay();
+    if (overlayShadow) {
+      // Re-use the already-rendered overlay (saved state) without ripping
+      // it down — keeps visual continuity when the user hits play.
+      transitionOverlayToRecording();
+    } else {
+      showOverlay();
+    }
     send({
       kind: "page",
       t: now(),
@@ -719,8 +790,18 @@
   function stop() {
     if (!recording) return;
     detach();
-    destroyOverlay();
     recording = false;
+    // Don't destroy the overlay — leave it on-screen in its saved state
+    // so the user can hit play to record again. The state flip already
+    // happened in transitionOverlayToSaved (called from handleStopClick).
+    // For tabs that didn't initiate stop (broadcast from background), do
+    // the transition here so the visual is consistent everywhere.
+    if (overlayShadow) {
+      const overlay = overlayShadow.querySelector(".overlay");
+      if (overlay && overlay.dataset.state !== "saved") {
+        transitionOverlayToSaved("Saved");
+      }
+    }
   }
 
   chrome.runtime.onMessage.addListener((msg) => {

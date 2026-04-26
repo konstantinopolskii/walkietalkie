@@ -7,85 +7,89 @@
     body { margin: 0; height: 100vh; background: linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%); }
     .stage { position: absolute; inset: 0; }
     .marker { position: absolute; top: 24px; left: 24px; font: 14px system-ui; color: #475569; }
+    .row { position: absolute; left: 50%; transform: translateX(-50%); display: flex; gap: 24px; }
+    .row.recording { bottom: 200px; }
+    .row.saved { bottom: 80px; }
+    .label-tag { position: absolute; top: -28px; left: 0; right: 0; text-align: center; font: 12px system-ui; color: #64748b; }
+    .frame { position: relative; width: 300px; height: 46px; }
   </style>
 </head>
 <body>
   <div class="stage">
-    <div class="marker">Sample host page (dev preview of the recording overlay)</div>
+    <div class="marker">Sample host page — dev preview of both overlay states</div>
+    <div class="row recording">
+      <div class="frame" id="frame-recording">
+        <div class="label-tag">Recording state</div>
+      </div>
+    </div>
+    <div class="row saved">
+      <div class="frame" id="frame-saved">
+        <div class="label-tag">Saved state — after stop</div>
+      </div>
+    </div>
   </div>
   <script>
-    // Stub chrome.runtime so content.js doesn't crash when loaded standalone.
-    window.chrome = {
-      runtime: {
-        onMessage: { addListener: () => {} },
-        sendMessage: () => Promise.resolve(null)
+    const STYLE = `
+      :host, * { box-sizing: border-box; margin: 0; padding: 0; }
+      .overlay {
+        width: 300px; height: 46px; border-radius: 12px;
+        background: rgba(0,0,0,0.78); backdrop-filter: blur(10px);
+        color: #fff; display: flex; align-items: center; gap: 10px;
+        padding: 0 10px 0 12px; font-family: -apple-system, system-ui, sans-serif;
+        position: relative;
       }
-    };
-  </script>
-  <script src="../content.js"></script>
-  <script>
-    // Manually call the same overlay path content.js exposes by re-running
-    // the message a host script would receive. The IIFE in content.js
-    // captured the listener; we route through the registered listener.
-    // Easiest: re-dispatch by querying internals — but the IIFE doesn't
-    // expose them. So we just inline a standalone copy of the overlay
-    // for visuals here.
-
-    const host = document.createElement("div");
-    Object.assign(host.style, {
-      position: "fixed", left: "50%", bottom: "20px",
-      transform: "translateX(-50%)", width: "300px", height: "46px",
-      pointerEvents: "none", zIndex: "2147483647"
-    });
-    const shadow = host.attachShadow({ mode: "open" });
-    shadow.innerHTML = `
-      <style>
-        :host, * { box-sizing: border-box; margin: 0; padding: 0; }
-        .overlay {
-          width: 300px; height: 46px; border-radius: 12px;
-          background: rgba(0,0,0,0.78); backdrop-filter: blur(10px);
-          color: #fff; display: flex; align-items: center; gap: 10px;
-          padding: 0 10px 0 12px; font-family: -apple-system, system-ui, sans-serif;
-        }
-        canvas { width: 64px; height: 26px; flex: 0 0 auto; }
-        .label { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; gap: 2px; }
-        .tag { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .text { font-size: 10px; opacity: 0.62; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .stop {
-          flex: 0 0 auto; width: 26px; height: 26px; border: 0; padding: 0;
-          border-radius: 7px; background: rgba(255,255,255,0.14);
-          cursor: pointer; display: flex; align-items: center; justify-content: center;
-          pointer-events: auto;
-        }
-        .stop-icon { width: 10px; height: 10px; background: #fff; border-radius: 2px; display: block; }
-      </style>
-      <div class="overlay">
-        <canvas></canvas>
-        <div class="label">
-          <span class="tag">button.nav-item</span>
-          <span class="text">Discovery v2 (Sonnet, exhaustive) 849 lines</span>
-        </div>
-        <button class="stop" aria-label="Stop recording">
-          <span class="stop-icon"></span>
-        </button>
-      </div>
+      .overlay[data-state="saved"] { background: rgba(20, 90, 56, 0.92); }
+      canvas { width: 64px; height: 26px; flex: 0 0 auto; }
+      .label { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.25; gap: 2px; }
+      .tag { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .text { font-size: 10px; opacity: 0.62; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .action {
+        flex: 0 0 auto; width: 26px; height: 26px; border: 0; padding: 0;
+        border-radius: 7px; background: rgba(255,255,255,0.14);
+        cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .overlay[data-state="saved"] .action { background: rgba(255,255,255,0.20); }
+      .stop-icon { width: 10px; height: 10px; background: #fff; border-radius: 2px; display: block; }
+      .play-icon { width: 0; height: 0;
+        border-left: 9px solid #fff;
+        border-top: 6px solid transparent;
+        border-bottom: 6px solid transparent;
+        margin-left: 2px; display: block; }
+      .overlay[data-state="recording"] .play-icon { display: none; }
+      .overlay[data-state="saved"] .stop-icon { display: none; }
     `;
-    document.documentElement.appendChild(host);
 
-    const canvas = shadow.querySelector("canvas");
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = 64 * dpr;
-    canvas.height = 26 * dpr;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-
-    // Synthesize 12 sample levels resembling speech RMS (~0.05-0.25).
-    const samples = [0.05, 0.10, 0.18, 0.22, 0.16, 0.08, 0.20, 0.25, 0.19, 0.12, 0.15, 0.10];
-    function draw() {
+    function paintOverlay(parent, state, tag, text) {
+      parent.style.position = "absolute";
+      parent.style.left = "0";
+      parent.style.bottom = "0";
+      const shadow = parent.attachShadow({ mode: "open" });
+      shadow.innerHTML = `
+        <style>${STYLE}</style>
+        <div class="overlay" data-state="${state}">
+          <canvas></canvas>
+          <div class="label">
+            <span class="tag">${tag}</span>
+            <span class="text">${text}</span>
+          </div>
+          <button class="action">
+            <span class="stop-icon"></span>
+            <span class="play-icon"></span>
+          </button>
+        </div>
+      `;
+      const canvas = shadow.querySelector("canvas");
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = 64 * dpr;
+      canvas.height = 26 * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
       const W = 64, H = 26;
-      ctx.clearRect(0, 0, W, H);
       const bars = 12, barW = 3;
       const gap = (W - bars * barW) / (bars - 1);
+      const samples = state === "recording"
+        ? [0.05, 0.10, 0.18, 0.22, 0.16, 0.08, 0.20, 0.25, 0.19, 0.12, 0.15, 0.10]
+        : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
       ctx.fillStyle = "rgba(255,255,255,0.92)";
       for (let i = 0; i < bars; i++) {
         const v = samples[i];
@@ -107,7 +111,11 @@
         ctx.fill();
       }
     }
-    draw();
+
+    paintOverlay(document.getElementById("frame-recording"), "recording",
+      "button.nav-item", "Discovery v2 (Sonnet, exhaustive) 849 lines");
+    paintOverlay(document.getElementById("frame-saved"), "saved",
+      "Saved", "Successfully copied briefing to clipboard");
   </script>
 </body>
 </html>

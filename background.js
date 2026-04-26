@@ -381,6 +381,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse(res);
       })();
       return true;
+    case "content:start":
+      // Play button on the in-page overlay started a fresh session.
+      (async () => {
+        const r = await startSession();
+        if (r.ok) setBadge(true);
+        sendResponse(r);
+      })();
+      return true;
     case "content:get-mics":
       // Content script can't enumerate devices reliably across pages. Ask
       // offscreen, which holds the mic permission and the active stream.
