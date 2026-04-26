@@ -179,11 +179,13 @@
     // a regular click event for it; the stop button has its own wiring.
     if (isOurOverlay(e.target)) return;
 
-    if (highlightedEl === e.target) {
-      // Second click on the same element — let it through, log a click,
-      // then drop the highlight so the next click starts fresh.
-      const d = describe(e.target);
+    if (highlightedEl) {
+      // A highlight is up — this click commits, no matter the target.
+      // Clear the border and let the page handle the click. Targeting the
+      // exact same DOM node twice was unreliable (nested children changed
+      // e.target between clicks), so any next click acts.
       clearHighlight();
+      const d = describe(e.target);
       if (!d) return;
       send({
         kind: "click",
@@ -198,9 +200,9 @@
       return;
     }
 
-    // First click on a new element — suppress the page's own action,
-    // paint the highlight, log a "highlight" event. Second click on
-    // the same target will pass through above.
+    // No highlight yet — first click. Suppress the page's own action,
+    // paint the highlight, log a "highlight" event. The next click
+    // commits via the branch above.
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -221,12 +223,12 @@
   }
 
   function onMouseDownCapture(e) {
-    // Some apps (esp. React/Vue) act on mousedown before click ever fires.
-    // Mirror the click guard: first interaction with a new element gets
-    // suppressed, so by the time the user double-confirms, the click
-    // path above takes over.
+    // Suppress mousedown only while there's no active highlight, so apps
+    // that fire on mousedown (React/Vue delegated handlers) can't sneak
+    // past on the first click. Once a highlight is up, the next click
+    // commits — so let mousedown through too.
     if (isOurOverlay(e.target)) return;
-    if (highlightedEl === e.target) return;
+    if (highlightedEl) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
@@ -234,7 +236,7 @@
 
   function onMouseUpCapture(e) {
     if (isOurOverlay(e.target)) return;
-    if (highlightedEl === e.target) return;
+    if (highlightedEl) return;
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation();
