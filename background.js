@@ -313,6 +313,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   chrome.storage.session.remove(SESSION_KEY).catch(() => {});
+
+  // Reloading an unpacked extension orphans every existing tab's content
+  // script — they keep running in the old, now-dead isolated world and
+  // can no longer receive messages from this fresh service worker. The
+  // manifest's content_scripts entry only auto-injects on subsequent
+  // navigations, so without this re-injection users had to reload every
+  // tab before recording would work. Inject once on install/update and
+  // the IIFE's __walkietalkie_attached__ guard prevents duplicates.
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab.id || !tab.url) continue;
+      if (!/^https?:|^file:/.test(tab.url)) continue;
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: false },
+        files: ["content.js"]
+      }).catch(() => {});
+    }
+  } catch {}
 });
