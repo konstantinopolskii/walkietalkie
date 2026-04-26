@@ -140,6 +140,56 @@ async function stop() {
   return { ok: true, dataUrl, ext, bytes: blob.size, mime };
 }
 
+async function listDevices() {
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const mics = all.filter((d) => d.kind === "audioinput").map((d) => ({
+      deviceId: d.deviceId,
+      label: d.label || `Microphone (${d.deviceId.slice(0, 6)}…)`
+    }));
+    return { ok: true, devices: mics };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+async function swap(deviceId) {
+  // Recording must be active to swap. If it's not, just save the
+  // preference (already done in background) and bail.
+  if (!recorder) return { ok: false, reason: "not-running" };
+  // Tear the live stream + recorder down without finalizing the file —
+  // the user is swapping because there's nothing worth keeping. We
+  // restart fresh on the new mic; chunks reset.
+  stopLevelLoop();
+  try { recorder.ondataavailable = null; } catch {}
+  try { recorder.stop(); } catch {}
+  if (stream) {
+    for (const track of stream.getTracks()) track.stop();
+  }
+  recorder = null;
+  stream = null;
+  chunks = [];
+
+  const constraints = deviceId
+    ? { audio: { deviceId: { ideal: deviceId } } }
+    : { audio: true };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (e) {
+    return { ok: false, reason: "mic-denied", error: String(e?.message || e) };
+  }
+  const picked = pickMime();
+  mime = picked || "audio/webm";
+  const opts = picked ? { mimeType: picked } : undefined;
+  recorder = new MediaRecorder(stream, opts);
+  recorder.addEventListener("dataavailable", (e) => {
+    if (e.data && e.data.size) chunks.push(e.data);
+  });
+  recorder.start(1000);
+  startLevelLoop();
+  return { ok: true, mime, ext: extFor(mime) };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.target !== "offscreen") return false;
   if (msg.type === "start") {
@@ -148,6 +198,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === "stop") {
     stop().then(sendResponse);
+    return true;
+  }
+  if (msg.type === "list-devices") {
+    listDevices().then(sendResponse);
+    return true;
+  }
+  if (msg.type === "swap") {
+    swap(msg.deviceId || "").then(sendResponse);
     return true;
   }
   return false;

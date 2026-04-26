@@ -19,8 +19,7 @@
     "type": "module"
   },
   "action": {
-    "default_popup": "popup.html",
-    "default_title": "WalkieTalkie"
+    "default_title": "WalkieTalkie — click to start, click stop on the overlay"
   },
   "content_scripts": [
     {

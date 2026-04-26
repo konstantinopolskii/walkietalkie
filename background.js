@@ -6,8 +6,10 @@
  * downloads API when the session stops.
  *
  * Wire:
- *   popup ──start/stop──▶ background ──┬──▶ offscreen (audio)
- *                                      └──▶ content scripts (DOM events)
+ *   action click ──▶ background ──┬──▶ offscreen (audio)
+ *                                  └──▶ content scripts (DOM events + overlay)
+ *   overlay stop ──▶ background ──▶ stops session, returns briefing
+ *   overlay wave ──▶ background ──▶ enumerates mics, swaps device
  *   offscreen ──audio dataUrl──▶ background
  *   content  ──events──▶ background
  *   background ──downloads.download──▶ ~/Downloads/walkietalkie/session-<id>/
@@ -16,6 +18,7 @@
 const OFFSCREEN_URL = "offscreen.html";
 const SESSION_KEY = "walkietalkie:session";
 const LAST_KEY = "walkietalkie:last";
+const MIC_DEVICE_KEY = "walkietalkie:mic-device-id";
 
 let session = null;
 let offscreenReadyResolver = null;
@@ -250,6 +253,116 @@ function renderLog(meta, events) {
   return lines.join("\n");
 }
 
+function fmtDuration(ms) {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s} sec`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r ? `${m} min ${r} sec` : `${m} min`;
+}
+
+function buildBriefing(last) {
+  const ext = last.audio?.ext || "webm";
+  const lines = [
+    `WalkieTalkie session ${last.id}`,
+    `folder: ~/Downloads/${last.folder}`,
+    `duration: ${fmtDuration(last.durationMs)}, ${last.events} events`,
+    `files:`
+  ];
+  if (last.audio?.ok) {
+    lines.push(`  audio.${ext.padEnd(6)}microphone capture (${ext})`);
+  }
+  lines.push(`  log.txt       human-readable timeline of clicks, selections, keys`);
+  lines.push(`  events.jsonl  same events, one JSON object per line`);
+  lines.push(`  session.json  metadata: started, stopped, duration, audio, ua`);
+  if (last.audio && last.audio.ok === false) {
+    lines.push(``);
+    lines.push(`audio: missing (${last.audio.error || "unknown"}). Events only.`);
+  }
+  lines.push(``);
+  lines.push(`Instructions for you (the agent):`);
+  if (last.audio?.ok) {
+    lines.push(`1. Transcribe audio.${ext} yourself.`);
+    lines.push(`2. Read log.txt and line up each voice segment with the DOM events`);
+    lines.push(`   by timestamp. Use events.jsonl for full DOM context (selector,`);
+    lines.push(`   bbox, attrs) on any moment.`);
+  } else {
+    lines.push(`1. Read log.txt and use events.jsonl for full DOM context`);
+    lines.push(`   (selector, bbox, attrs) on any moment.`);
+  }
+  lines.push(`3. If anything is unclear — what I meant, why I did something, where`);
+  lines.push(`   I want to take it next — ask before assuming.`);
+  lines.push(`4. After the analysis, summarize what you understood and confirm the`);
+  lines.push(`   direction with me before you act on it.`);
+  return lines.join("\n");
+}
+
+async function openMicSetup() {
+  await chrome.tabs.create({ url: chrome.runtime.getURL("setup.html") });
+}
+
+function setBadge(recording) {
+  try {
+    chrome.action.setBadgeBackgroundColor({ color: "#e21b1b" });
+    chrome.action.setBadgeText({ text: recording ? "REC" : "" });
+  } catch {}
+}
+
+async function copyBriefingFromActiveTab(briefing) {
+  // Try the active tab first — clipboard.writeText needs a document
+  // context with user activation. The action click is a user gesture
+  // and propagates to scripting.executeScript here.
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url || /^chrome:|^chrome-extension:/.test(tab.url)) return false;
+    const res = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (text) => navigator.clipboard.writeText(text).then(() => true, () => false),
+      args: [briefing]
+    });
+    return !!res?.[0]?.result;
+  } catch {
+    return false;
+  }
+}
+
+async function ensureContentInTab(tab) {
+  if (!tab?.id || !tab.url) return;
+  if (!/^https?:|^file:/.test(tab.url)) return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content.js"]
+    });
+  } catch {}
+}
+
+async function handleActionClick(tab) {
+  if (session) {
+    // Toggle off: stop the session, copy briefing, fade overlays away.
+    const res = await stopSession();
+    setBadge(false);
+    if (res.ok && res.last) {
+      const briefing = buildBriefing(res.last);
+      await copyBriefingFromActiveTab(briefing);
+    }
+    return;
+  }
+  // Force the active tab to have a live content script before kicking
+  // off — covers tabs opened before the extension was installed.
+  await ensureContentInTab(tab);
+  const res = await startSession();
+  if (!res.ok) return;
+  setBadge(true);
+  if (res.audio && res.audio.ok === false && res.audio.error === "mic-denied") {
+    await openMicSetup();
+  }
+}
+
+chrome.action.onClicked.addListener((tab) => {
+  handleActionClick(tab);
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || typeof message !== "object") return false;
   if (message.target && message.target !== "background") return false;
@@ -259,7 +372,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       startSession().then(sendResponse);
       return true;
     case "popup:stop":
-      stopSession().then(sendResponse);
+      (async () => {
+        const res = await stopSession();
+        setBadge(false);
+        if (res.ok && res.last) {
+          res.briefing = buildBriefing(res.last);
+        }
+        sendResponse(res);
+      })();
+      return true;
+    case "content:get-mics":
+      // Content script can't enumerate devices reliably across pages. Ask
+      // offscreen, which holds the mic permission and the active stream.
+      (async () => {
+        const r = await chrome.runtime.sendMessage({ target: "offscreen", type: "list-devices" }).catch(() => null);
+        const stored = (await chrome.storage.local.get(MIC_DEVICE_KEY))[MIC_DEVICE_KEY] || "";
+        sendResponse({
+          ok: !!(r && r.ok),
+          devices: r?.devices || [],
+          current: stored
+        });
+      })();
+      return true;
+    case "content:swap-mic":
+      // Save preference, then ask offscreen to swap the live stream.
+      (async () => {
+        await chrome.storage.local.set({ [MIC_DEVICE_KEY]: message.deviceId || "" });
+        const r = await chrome.runtime.sendMessage({
+          target: "offscreen", type: "swap", deviceId: message.deviceId || ""
+        }).catch(() => ({ ok: false }));
+        sendResponse(r || { ok: false });
+      })();
       return true;
     case "popup:state":
       (async () => {

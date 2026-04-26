@@ -377,12 +377,30 @@
           font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", system-ui, sans-serif;
           font-feature-settings: "tnum" 1;
           animation: wt-fade 160ms ease-out;
+          position: relative;
         }
         @keyframes wt-fade {
           from { opacity: 0; transform: translateY(4px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        canvas { width: 64px; height: 26px; flex: 0 0 auto; }
+        .wave-btn {
+          flex: 0 0 auto;
+          width: 64px;
+          height: 32px;
+          border: 0;
+          padding: 0 0 0 0;
+          margin: 0;
+          background: transparent;
+          cursor: pointer;
+          pointer-events: auto;
+          border-radius: 6px;
+          transition: background 120ms ease-out;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .wave-btn:hover { background: rgba(255, 255, 255, 0.08); }
+        canvas { width: 64px; height: 26px; flex: 0 0 auto; pointer-events: none; }
         .label {
           display: flex;
           flex-direction: column;
@@ -433,16 +451,95 @@
           border-radius: 2px;
           display: block;
         }
+
+        /* Mic picker popover, anchored above the wave when expanded */
+        .mics {
+          position: absolute;
+          left: 6px;
+          bottom: 54px;
+          width: 240px;
+          max-height: 220px;
+          overflow: auto;
+          background: rgba(0, 0, 0, 0.86);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border-radius: 10px;
+          padding: 6px;
+          pointer-events: auto;
+          color: #fff;
+          font-size: 11px;
+          line-height: 1.3;
+          box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+          animation: wt-fade 140ms ease-out;
+        }
+        .mics[hidden] { display: none; }
+        .mics-head {
+          font-size: 10px;
+          opacity: 0.55;
+          padding: 6px 8px 4px;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+        }
+        .mic-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 8px;
+          border-radius: 6px;
+          cursor: pointer;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .mic-item:hover { background: rgba(255, 255, 255, 0.10); }
+        .mic-item[data-current="1"] { background: rgba(255, 255, 255, 0.06); }
+        .mic-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          flex: 0 0 auto;
+          background: transparent;
+        }
+        .mic-item[data-current="1"] .mic-dot { background: #fff; }
+        .mic-name {
+          flex: 1;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        /* Confirmation flash on stop ("Copied to clipboard") */
+        .toast {
+          position: absolute;
+          inset: 0;
+          border-radius: 12px;
+          background: rgba(0, 0, 0, 0.86);
+          color: #fff;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: -0.01em;
+          opacity: 0;
+          transition: opacity 140ms ease-out;
+          pointer-events: none;
+        }
+        .toast[data-show="1"] { opacity: 1; }
       </style>
       <div class="overlay" role="status" aria-label="WalkieTalkie recording">
-        <canvas></canvas>
+        <button class="wave-btn" type="button" aria-label="Switch microphone" title="Switch microphone">
+          <canvas></canvas>
+        </button>
         <div class="label">
           <span class="tag">Recording</span>
           <span class="text"></span>
         </div>
-        <button class="stop" type="button" aria-label="Stop recording" title="Stop recording">
+        <button class="stop" type="button" aria-label="Stop and copy briefing" title="Stop and copy briefing">
           <span class="stop-icon"></span>
         </button>
+        <div class="mics" hidden></div>
+        <div class="toast"></div>
       </div>
     `;
     document.documentElement.appendChild(overlayHost);
@@ -455,12 +552,72 @@
     waveCtx.scale(dpr, dpr);
     levelSamples.length = 0;
 
-    overlayShadow.querySelector(".stop").addEventListener("click", () => {
-      chrome.runtime.sendMessage({ target: "background", type: "popup:stop" }).catch(() => {});
-    });
+    overlayShadow.querySelector(".stop").addEventListener("click", handleStopClick);
+    overlayShadow.querySelector(".wave-btn").addEventListener("click", toggleMicPicker);
 
     setOverlayLabel("Recording", clip(document.title || location.host, 60));
     drawWave();
+  }
+
+  async function toggleMicPicker() {
+    if (!overlayShadow) return;
+    const panel = overlayShadow.querySelector(".mics");
+    if (!panel.hidden) {
+      panel.hidden = true;
+      panel.innerHTML = "";
+      return;
+    }
+    panel.hidden = false;
+    panel.innerHTML = `<div class="mics-head">Loading microphones…</div>`;
+    const res = await chrome.runtime.sendMessage({ target: "background", type: "content:get-mics" }).catch(() => null);
+    if (!res || !res.ok) {
+      panel.innerHTML = `<div class="mics-head">Microphone list unavailable</div>`;
+      return;
+    }
+    const items = res.devices.map((d) => {
+      const isCurrent = d.deviceId === res.current ? "1" : "";
+      const safe = (d.label || "Microphone").replace(/[<>&"']/g, "");
+      return `<div class="mic-item" data-id="${d.deviceId}" data-current="${isCurrent}">
+        <span class="mic-dot"></span>
+        <span class="mic-name">${safe}</span>
+      </div>`;
+    }).join("");
+    panel.innerHTML = `<div class="mics-head">Switch microphone</div>${items || `<div class="mics-head">No inputs found</div>`}`;
+    panel.querySelectorAll(".mic-item").forEach((el) => {
+      el.addEventListener("click", async () => {
+        const deviceId = el.getAttribute("data-id") || "";
+        panel.hidden = true;
+        panel.innerHTML = "";
+        await chrome.runtime.sendMessage({
+          target: "background", type: "content:swap-mic", deviceId
+        }).catch(() => {});
+      });
+    });
+  }
+
+  async function handleStopClick() {
+    const res = await chrome.runtime.sendMessage({ target: "background", type: "popup:stop" }).catch(() => null);
+    if (!res?.ok) return;
+    if (res.briefing) {
+      try {
+        await navigator.clipboard.writeText(res.briefing);
+        flashToast("Copied briefing to clipboard");
+      } catch {
+        flashToast("Saved — clipboard blocked, copy from popup");
+      }
+    } else {
+      flashToast("Saved");
+    }
+    // Overlay tear-down comes from background broadcasting content:stop
+    // to every tab; the toast lives just long enough to be seen first.
+  }
+
+  function flashToast(text) {
+    if (!overlayShadow) return;
+    const toast = overlayShadow.querySelector(".toast");
+    if (!toast) return;
+    toast.textContent = text;
+    toast.dataset.show = "1";
   }
 
   function destroyOverlay() {
