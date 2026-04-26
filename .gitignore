@@ -1,0 +1,4 @@
+node_modules/
+vendor/kk/
+*.zip
+.DS_Store

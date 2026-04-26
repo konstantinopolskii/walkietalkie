@@ -1,0 +1,47 @@
+/* Popup-only adjustments. The kit ships with --inspector-w: 420px and the
+   .inspector column already owns padding, gaps, and card rhythm — we only
+   reset the document chrome that doesn't apply inside a popup window. */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-weight: var(--fw-regular);
+}
+
+.talktrack-popup {
+  width: var(--inspector-w);
+}
+
+.talktrack-popup .inspector {
+  padding-block-end: var(--space-6);
+}
+
+#recorder[data-mode="recording"] {
+  --color-bg:              #000000;
+  --color-text:            #ffffff;
+  --color-text-muted:      rgba(255, 255, 255, 0.55);
+  --color-text-subtle:     rgba(255, 255, 255, 0.35);
+  --color-surface-overlay: rgba(255, 255, 255, 0.08);
+  --color-surface-strong:  rgba(255, 255, 255, 0.14);
+  --color-border:          rgba(255, 255, 255, 0.16);
+  --color-border-strong:   rgba(255, 255, 255, 0.28);
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-radius: var(--radius-lg);
+}
+
+#recorder[data-mode="recording"] #elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+#session-path {
+  margin: 0;
+  padding: var(--space-3);
+  background: var(--color-surface-overlay);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-all;
+}

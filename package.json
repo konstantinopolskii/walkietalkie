@@ -1,0 +1,17 @@
+{
+  "name": "talktrack",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension that records voice plus DOM interactions on any page.",
+  "author": "Konstantin Konstantinopolskii <k.konstantinopolskiy@gmail.com>",
+  "license": "UNLICENSED",
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "dependencies": {
+    "@kk/design-system": "github:konstantinopolskii/kk-agentic-ds"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

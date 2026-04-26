@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TalkTrack</title>
+  <link rel="stylesheet" href="./vendor/kk/vars.css">
+  <link rel="stylesheet" href="./vendor/kk/style.css">
+  <link rel="stylesheet" href="./popup.css">
+</head>
+<body class="talktrack-popup">
+  <aside class="inspector" aria-label="TalkTrack">
+
+    <section class="inspector__group">
+      <header class="card card--heading">
+        <h2 class="t-display">TalkTrack</h2>
+        <p class="t-caption t-muted">Voice plus taps, on any page.</p>
+      </header>
+
+      <article class="card" id="recorder" data-mode="idle">
+        <div class="card__heading" data-mode-show="idle">
+          <h3 class="t-title">Ready to record</h3>
+          <p class="t-caption">Hit start. Talk through the page. Click whatever you want to mark.</p>
+        </div>
+
+        <div class="card__heading" data-mode-show="recording" hidden>
+          <h3 class="t-display" id="elapsed">00:00</h3>
+          <p class="t-caption">Recording. Click anywhere on the page to mark a moment. Speak freely.</p>
+        </div>
+
+        <button class="button button--primary t-subtitle" id="start" data-mode-show="idle" type="button">Start recording</button>
+        <button class="button button--primary t-subtitle" id="stop" data-mode-show="recording" type="button" hidden>Stop</button>
+      </article>
+
+      <article class="card" id="session" hidden>
+        <div class="card__heading">
+          <h3 class="t-title">Last session</h3>
+          <p class="t-caption" id="session-summary"></p>
+          <pre class="t-code t-code--block" id="session-path"></pre>
+        </div>
+        <button class="button t-subtitle" id="copy-path" type="button">Copy terminal path</button>
+      </article>
+    </section>
+
+  </aside>
+  <script src="./popup.js" type="module"></script>
+</body>
+</html>
