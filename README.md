@@ -20,10 +20,21 @@ Each session writes a folder under your Chrome download directory:
 On macOS the default download directory is `~/Downloads`. Point Chrome's
 download location at `~/Documents` if you want sessions to land there.
 
-After a session, the popup shows a copy-ready terminal command:
+After a session, the popup shows a paste-ready briefing — drop it into
+your agent and it knows where to look and what each file holds:
 
 ```
-cd ~/Downloads/talktrack/session-20260426-114530
+TalkTrack session 20260426-114530
+folder: ~/Downloads/talktrack/session-20260426-114530
+duration: 3 min 12 sec, 47 events
+files:
+  audio.webm    microphone capture, opus in webm
+  log.txt       human-readable timeline of clicks, selections, keys
+  events.jsonl  same events, one JSON object per line
+  session.json  metadata: started, stopped, duration, user agent
+
+Read log.txt first for the timeline. Match timestamps in events.jsonl
+for full DOM context (selector, bbox, attrs) on any moment.
 ```
 
 ## Install

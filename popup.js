@@ -5,9 +5,8 @@ const startBtn = document.getElementById("start");
 const stopBtn = document.getElementById("stop");
 const elapsed = document.getElementById("elapsed");
 const sessionCard = document.getElementById("session");
-const sessionSummary = document.getElementById("session-summary");
-const sessionPath = document.getElementById("session-path");
-const copyBtn = document.getElementById("copy-path");
+const sessionBriefing = document.getElementById("session-briefing");
+const copyBtn = document.getElementById("copy-briefing");
 
 let timerHandle = null;
 
@@ -47,14 +46,29 @@ function fmtDuration(ms) {
   return r ? `${m} min ${r} sec` : `${m} min`;
 }
 
+function buildBriefing(last) {
+  return [
+    `TalkTrack session ${last.id}`,
+    `folder: ~/Downloads/${last.folder}`,
+    `duration: ${fmtDuration(last.durationMs)}, ${last.events} events`,
+    `files:`,
+    `  audio.webm    microphone capture, opus in webm`,
+    `  log.txt       human-readable timeline of clicks, selections, keys`,
+    `  events.jsonl  same events, one JSON object per line`,
+    `  session.json  metadata: started, stopped, duration, user agent`,
+    ``,
+    `Read log.txt first for the timeline. Match timestamps in events.jsonl`,
+    `for full DOM context (selector, bbox, attrs) on any moment.`
+  ].join("\n");
+}
+
 function renderLast(last) {
   if (!last) {
     sessionCard.hidden = true;
     return;
   }
   sessionCard.hidden = false;
-  sessionSummary.textContent = `${fmtDuration(last.durationMs)} · ${last.events} events captured.`;
-  sessionPath.textContent = `cd ~/Downloads/${last.folder}`;
+  sessionBriefing.textContent = buildBriefing(last);
 }
 
 async function refresh() {
@@ -91,7 +105,7 @@ stopBtn.addEventListener("click", async () => {
 });
 
 copyBtn.addEventListener("click", async () => {
-  const text = sessionPath.textContent;
+  const text = sessionBriefing.textContent;
   try {
     await navigator.clipboard.writeText(text);
     const original = copyBtn.textContent;

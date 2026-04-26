@@ -37,11 +37,13 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-#session-path {
+#session-briefing {
   margin: 0;
   padding: var(--space-3);
   background: var(--color-surface-overlay);
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
-  word-break: break-all;
+  word-break: break-word;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
 }
